@@ -11,6 +11,7 @@ import static io.zeebe.broker.system.configuration.EnvironmentConstants.ENV_EMBE
 
 import io.zeebe.gateway.impl.configuration.GatewayCfg;
 import io.zeebe.util.Environment;
+import io.zeebe.util.SocketUtil;
 
 public final class EmbeddedGatewayCfg extends GatewayCfg implements ConfigurationEntry {
 
@@ -32,7 +33,8 @@ public final class EmbeddedGatewayCfg extends GatewayCfg implements Configuratio
     init(environment, networkCfg.getHost());
 
     // ensure embedded gateway can access local broker
-    getCluster().setContactPoint(networkCfg.getInternalApi().getAddress().toString());
+    getCluster()
+        .setContactPoint(SocketUtil.toHostAndPortString(networkCfg.getInternalApi().getAddress()));
 
     // configure embedded gateway based on broker config
     getNetwork().setPort(getNetwork().getPort() + (networkCfg.getPortOffset() * 10));
