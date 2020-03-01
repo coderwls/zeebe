@@ -7,28 +7,23 @@
  */
 package io.zeebe.broker.logstreams;
 
-import io.zeebe.broker.logstreams.state.StatePositionSupplier;
-import io.zeebe.logstreams.log.LogStream;
 import io.zeebe.logstreams.state.Snapshot;
 import io.zeebe.logstreams.state.SnapshotDeletionListener;
 import io.zeebe.logstreams.state.SnapshotStorage;
 import io.zeebe.util.sched.Actor;
 
-public final class LogStreamDeletionService extends Actor implements SnapshotDeletionListener {
-  private final LogStream logStream;
-  private final StatePositionSupplier positionSupplier;
+public final class LogDeletionService extends Actor implements SnapshotDeletionListener {
+  private final LogCompactor logCompactor;
   private final SnapshotStorage snapshotStorage;
   private final String actorName;
 
-  public LogStreamDeletionService(
+  public LogDeletionService(
       final int nodeId,
       final int partitionId,
-      final LogStream logStream,
-      final SnapshotStorage snapshotStorage,
-      final StatePositionSupplier positionSupplier) {
+      final LogCompactor logCompactor,
+      final SnapshotStorage snapshotStorage) {
     this.snapshotStorage = snapshotStorage;
-    this.logStream = logStream;
-    this.positionSupplier = positionSupplier;
+    this.logCompactor = logCompactor;
     actorName = buildActorName(nodeId, "DeletionService-" + partitionId);
   }
 
@@ -55,7 +50,6 @@ public final class LogStreamDeletionService extends Actor implements SnapshotDel
   }
 
   private void delegateDeletion(final Snapshot snapshot) {
-    final long minPosition = positionSupplier.getLowestPosition(snapshot.getPath());
-    logStream.delete(minPosition);
+    logCompactor.compactLog(snapshot.getCompactionBound()).join();
   }
 }

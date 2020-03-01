@@ -149,8 +149,8 @@ public final class AtomixSnapshotStorageTest {
     // then
     assertThat(storage.getLatestSnapshot())
         .isPresent()
-        .map(Snapshot::getPosition)
-        .hasValue(snapshot.getPosition());
+        .map(Snapshot::getCompactionBound)
+        .hasValue(snapshot.getCompactionBound());
   }
 
   @Test
