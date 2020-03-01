@@ -23,7 +23,6 @@ import io.atomix.storage.journal.JournalReader.Mode;
 import io.zeebe.logstreams.impl.log.LoggedEventImpl;
 import io.zeebe.logstreams.spi.LogStorage;
 import io.zeebe.logstreams.storage.atomix.AtomixAppenderSupplier;
-import io.zeebe.logstreams.storage.atomix.AtomixLogCompactor;
 import io.zeebe.logstreams.storage.atomix.AtomixLogStorage;
 import io.zeebe.logstreams.storage.atomix.AtomixReaderFactory;
 import java.io.File;
@@ -35,16 +34,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.LongConsumer;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
-import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.rules.ExternalResource;
 import org.junit.rules.TemporaryFolder;
 
 public final class AtomixLogStorageRule extends ExternalResource
-    implements AtomixLogCompactor,
-        AtomixReaderFactory,
-        AtomixAppenderSupplier,
-        ZeebeLogAppender,
-        Supplier<LogStorage> {
+    implements AtomixReaderFactory, AtomixAppenderSupplier, ZeebeLogAppender, Supplier<LogStorage> {
   private final LoggedEventImpl event = new LoggedEventImpl();
   private final TemporaryFolder temporaryFolder;
   private final int partitionId;
@@ -101,10 +95,18 @@ public final class AtomixLogStorageRule extends ExternalResource
     raftLog.writer().commit(entry.index());
 
     if (positionListener != null) {
-      positionListener.accept(findGreatestPosition(entry));
+      positionListener.accept(highestPosition);
     }
 
     listener.onCommit(entry);
+  }
+
+  public Indexed<ZeebeEntry> appendEntry(
+      final long lowestPosition, final long highestPosition, final ByteBuffer data) {
+    final var listener = new NoopListener();
+    appendEntry(lowestPosition, highestPosition, data, listener);
+
+    return listener.lastWrittenEntry;
   }
 
   @Override
@@ -117,7 +119,6 @@ public final class AtomixLogStorageRule extends ExternalResource
     return Optional.of(this);
   }
 
-  @Override
   public CompletableFuture<Void> compact(final long index) {
     raftLog.compact(index);
     return CompletableFuture.completedFuture(null);
@@ -151,7 +152,7 @@ public final class AtomixLogStorageRule extends ExternalResource
     snapshotStore = raftStorage.getSnapshotStore();
     metaStore = raftStorage.openMetaStore();
 
-    storage = spy(new AtomixLogStorage(this, this, this));
+    storage = spy(new AtomixLogStorage(this, this));
   }
 
   public void close() {
@@ -200,16 +201,21 @@ public final class AtomixLogStorageRule extends ExternalResource
         .withRetainStaleSnapshots();
   }
 
-  private long findGreatestPosition(final Indexed<ZeebeEntry> indexed) {
-    final var entry = indexed.entry();
-    final var data = new UnsafeBuffer(entry.data());
+  private static final class NoopListener implements AppendListener {
+    private Indexed<ZeebeEntry> lastWrittenEntry;
 
-    var offset = 0;
-    do {
-      event.wrap(data, offset);
-      offset += event.getLength();
-    } while (offset < data.capacity());
+    @Override
+    public void onWrite(final Indexed<ZeebeEntry> indexed) {
+      lastWrittenEntry = indexed;
+    }
 
-    return event.getPosition();
+    @Override
+    public void onWriteError(final Throwable throwable) {}
+
+    @Override
+    public void onCommit(final Indexed<ZeebeEntry> indexed) {}
+
+    @Override
+    public void onCommitError(final Indexed<ZeebeEntry> indexed, final Throwable throwable) {}
   }
 }

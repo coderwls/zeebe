@@ -96,7 +96,7 @@ public class StateSnapshotController implements SnapshotController {
   }
 
   @Override
-  public long recover() throws Exception {
+  public void recover() throws Exception {
     final var runtimeDirectory = storage.getRuntimeDirectory();
 
     if (Files.exists(runtimeDirectory)) {
@@ -107,10 +107,8 @@ public class StateSnapshotController implements SnapshotController {
         storage.getSnapshots().sorted(Comparator.reverseOrder()).collect(Collectors.toList());
     LOG.debug("Available snapshots: {}", snapshots);
 
-    long lowerBoundSnapshotPosition = -1;
-
     final var snapshotIterator = snapshots.iterator();
-    while (snapshotIterator.hasNext() && lowerBoundSnapshotPosition < 0) {
+    while (snapshotIterator.hasNext()) {
       final var snapshot = snapshotIterator.next();
 
       FileUtil.copySnapshot(runtimeDirectory, snapshot.getPath());
@@ -119,7 +117,7 @@ public class StateSnapshotController implements SnapshotController {
         // open database to verify that the snapshot is recoverable
         openDb();
         LOG.debug("Recovered state from snapshot '{}'", snapshot);
-        lowerBoundSnapshotPosition = snapshot.getPosition();
+        break;
       } catch (final Exception e) {
         FileUtil.deleteFolder(runtimeDirectory);
 
@@ -138,8 +136,6 @@ public class StateSnapshotController implements SnapshotController {
         }
       }
     }
-
-    return lowerBoundSnapshotPosition;
   }
 
   @Override
@@ -156,11 +152,6 @@ public class StateSnapshotController implements SnapshotController {
   @Override
   public int getValidSnapshotsCount() {
     return (int) storage.getSnapshots().count();
-  }
-
-  @Override
-  public long getLastValidSnapshotPosition() {
-    return storage.getLatestSnapshot().map(Snapshot::getPosition).orElse(-1L);
   }
 
   @Override

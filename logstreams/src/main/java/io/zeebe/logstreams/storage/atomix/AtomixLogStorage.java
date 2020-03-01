@@ -15,23 +15,19 @@ import java.util.NoSuchElementException;
 
 public class AtomixLogStorage implements LogStorage {
   private final AtomixReaderFactory readerFactory;
-  private final AtomixLogCompactor logCompacter;
   private final AtomixAppenderSupplier appenderSupplier;
 
   private boolean opened;
 
   public AtomixLogStorage(
-      final AtomixReaderFactory readerFactory,
-      final AtomixLogCompactor logCompacter,
-      final AtomixAppenderSupplier appenderSupplier) {
+      final AtomixReaderFactory readerFactory, final AtomixAppenderSupplier appenderSupplier) {
     this.readerFactory = readerFactory;
-    this.logCompacter = logCompacter;
     this.appenderSupplier = appenderSupplier;
   }
 
   public static AtomixLogStorage ofPartition(final RaftPartition partition) {
     final var server = new AtomixRaftServer(partition.getServer());
-    return new AtomixLogStorage(server, server, server);
+    return new AtomixLogStorage(server, server);
   }
 
   @Override
@@ -57,11 +53,6 @@ public class AtomixLogStorage implements LogStorage {
           new NoSuchElementException(
               "Expected an appender, but none found, most likely we are not the leader"));
     }
-  }
-
-  @Override
-  public void delete(final long index) {
-    logCompacter.compact(index);
   }
 
   @Override
