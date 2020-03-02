@@ -354,9 +354,9 @@ public final class WorkflowStateTest {
 
     // then
     assertThat(workflows.size()).isEqualTo(3);
-    Assertions.assertThat(workflows)
-        .extracting(DeployedWorkflow::getBpmnProcessId)
-        .contains(wrapString("processId"), wrapString("otherId"));
+    Assertions.assertThat(
+            workflows.stream().map(p -> BufferUtil.bufferAsString(p.getBpmnProcessId())))
+        .contains("processId", "otherId");
     Assertions.assertThat(workflows).extracting(DeployedWorkflow::getVersion).contains(1, 2, 1);
 
     Assertions.assertThat(workflows)
@@ -439,11 +439,7 @@ public final class WorkflowStateTest {
     final BpmnModelInstance modelInstance =
         Bpmn.createExecutableProcess(processId)
             .startEvent()
-            .serviceTask(
-                "test",
-                task -> {
-                  task.zeebeTaskType("type");
-                })
+            .serviceTask("test", task -> task.zeebeTaskType("type"))
             .endEvent()
             .done();
 

@@ -10,7 +10,6 @@ package io.zeebe.engine.state.deployment;
 import io.zeebe.db.ColumnFamily;
 import io.zeebe.db.DbContext;
 import io.zeebe.db.ZeebeDb;
-import io.zeebe.db.impl.DbBuffer;
 import io.zeebe.db.impl.DbCompositeKey;
 import io.zeebe.db.impl.DbLong;
 import io.zeebe.db.impl.DbString;
@@ -52,12 +51,14 @@ public final class WorkflowPersistenceCache {
   private final ColumnFamily<DbCompositeKey, PersistedWorkflow> workflowByIdAndVersionColumnFamily;
   private final DbCompositeKey<DbString, DbLong> idAndVersionKey;
 
-  private final ColumnFamily<DbString, DbLong> latestWorkflowColumnFamily;
+  private final ColumnFamily<DbString, LatestWorkflowVersion> latestWorkflowColumnFamily;
   private final DbString workflowId;
+  private final LatestWorkflowVersion latestWorkflowVersion;
   private final DbLong workflowVersion;
 
-  private final ColumnFamily<DbString, DbBuffer> digestByIdColumnFamily;
-  private final DbBuffer digest;
+  private final ColumnFamily<DbString, Digest> digestByIdColumnFamily;
+  private final Digest digest;
+
   private final ExpandableArrayBuffer buffer = new ExpandableArrayBuffer();
 
   public WorkflowPersistenceCache(
@@ -78,11 +79,15 @@ public final class WorkflowPersistenceCache {
             idAndVersionKey,
             persistedWorkflow);
 
+    latestWorkflowVersion = new LatestWorkflowVersion();
     latestWorkflowColumnFamily =
         zeebeDb.createColumnFamily(
-            ZbColumnFamilies.WORKFLOW_CACHE_LATEST_KEY, dbContext, workflowId, workflowVersion);
+            ZbColumnFamilies.WORKFLOW_CACHE_LATEST_KEY,
+            dbContext,
+            workflowId,
+            latestWorkflowVersion);
 
-    digest = new DbBuffer();
+    digest = new Digest();
     digestByIdColumnFamily =
         zeebeDb.createColumnFamily(
             ZbColumnFamilies.WORKFLOW_CACHE_DIGEST_BY_ID, dbContext, workflowId, digest);
@@ -93,20 +98,24 @@ public final class WorkflowPersistenceCache {
 
   boolean putDeployment(final long deploymentKey, final DeploymentRecord deploymentRecord) {
     final boolean isNewDeployment = !deployments.contains(deploymentKey);
-    if (isNewDeployment) {
-      for (final Workflow workflow : deploymentRecord.workflows()) {
-        final long workflowKey = workflow.getKey();
-        final DirectBuffer resourceName = workflow.getResourceNameBuffer();
-        for (final DeploymentResource resource : deploymentRecord.resources()) {
-          if (resource.getResourceNameBuffer().equals(resourceName)) {
-            persistWorkflow(workflowKey, workflow, resource);
-            updateLatestVersion(workflow);
-          }
+    if (!isNewDeployment) {
+      return false;
+    }
+
+    for (final Workflow workflow : deploymentRecord.workflows()) {
+      final long workflowKey = workflow.getKey();
+      final DirectBuffer resourceName = workflow.getResourceNameBuffer();
+
+      for (final DeploymentResource resource : deploymentRecord.resources()) {
+        if (resource.getResourceNameBuffer().equals(resourceName)) {
+          persistWorkflow(workflowKey, workflow, resource);
+          updateLatestVersion(workflow);
         }
       }
-      deployments.add(deploymentKey);
     }
-    return isNewDeployment;
+
+    deployments.add(deploymentKey);
+    return true;
   }
 
   private void persistWorkflow(
@@ -123,12 +132,12 @@ public final class WorkflowPersistenceCache {
 
   private void updateLatestVersion(final Workflow workflow) {
     workflowId.wrapBuffer(workflow.getBpmnProcessIdBuffer());
-    final DbLong storedVersion = latestWorkflowColumnFamily.get(workflowId);
-    final long latestVersion = storedVersion == null ? -1 : storedVersion.getValue();
+    final LatestWorkflowVersion storedVersion = latestWorkflowColumnFamily.get(workflowId);
+    final long latestVersion = storedVersion == null ? -1 : storedVersion.getWorkflowVersion();
 
     if (workflow.getVersion() > latestVersion) {
-      workflowVersion.wrapLong(workflow.getVersion());
-      latestWorkflowColumnFamily.put(workflowId, workflowVersion);
+      latestWorkflowVersion.setWorkflowVersion(workflow.getVersion());
+      latestWorkflowColumnFamily.put(workflowId, latestWorkflowVersion);
     }
   }
 
@@ -146,7 +155,7 @@ public final class WorkflowPersistenceCache {
 
     final ExecutableWorkflow executableWorkflow =
         definitions.stream()
-            .filter((w) -> BufferUtil.equals(persistedWorkflow.getBpmnProcessId(), w.getId()))
+            .filter(w -> BufferUtil.equals(persistedWorkflow.getBpmnProcessId(), w.getId()))
             .findFirst()
             .get();
 
@@ -185,13 +194,13 @@ public final class WorkflowPersistenceCache {
         workflowsByProcessIdAndVersion.get(processId);
 
     workflowId.wrapBuffer(processId);
-    final DbLong latestVersion = latestWorkflowColumnFamily.get(workflowId);
+    final LatestWorkflowVersion latestVersion = latestWorkflowColumnFamily.get(workflowId);
 
     DeployedWorkflow deployedWorkflow;
     if (versionMap == null) {
       deployedWorkflow = lookupWorkflowByIdAndPersistedVersion(latestVersion);
     } else {
-      deployedWorkflow = versionMap.get(latestVersion.getValue());
+      deployedWorkflow = versionMap.get(latestVersion.getWorkflowVersion());
       if (deployedWorkflow == null) {
         deployedWorkflow = lookupWorkflowByIdAndPersistedVersion(latestVersion);
       }
@@ -199,8 +208,9 @@ public final class WorkflowPersistenceCache {
     return deployedWorkflow;
   }
 
-  private DeployedWorkflow lookupWorkflowByIdAndPersistedVersion(final DbLong version) {
-    final long latestVersion = version != null ? version.getValue() : -1;
+  private DeployedWorkflow lookupWorkflowByIdAndPersistedVersion(
+      final LatestWorkflowVersion version) {
+    final long latestVersion = version != null ? version.getWorkflowVersion() : -1;
     workflowVersion.wrapLong(latestVersion);
 
     final PersistedWorkflow persistedWorkflow =
@@ -292,19 +302,19 @@ public final class WorkflowPersistenceCache {
   }
 
   private void updateCompleteInMemoryState() {
-    workflowColumnFamily.forEach((workflow) -> updateInMemoryState(persistedWorkflow));
+    workflowColumnFamily.forEach(workflow -> updateInMemoryState(persistedWorkflow));
   }
 
   public void putLatestVersionDigest(final DirectBuffer processId, final DirectBuffer digest) {
     workflowId.wrapBuffer(processId);
-    this.digest.wrapBuffer(digest);
+    this.digest.set(digest);
 
     digestByIdColumnFamily.put(workflowId, this.digest);
   }
 
   public DirectBuffer getLatestVersionDigest(final DirectBuffer processId) {
     workflowId.wrapBuffer(processId);
-    final DbBuffer dbBuffer = digestByIdColumnFamily.get(workflowId);
-    return dbBuffer == null ? null : dbBuffer.getValue();
+    final Digest digest = digestByIdColumnFamily.get(workflowId);
+    return digest == null ? null : digest.get();
   }
 }

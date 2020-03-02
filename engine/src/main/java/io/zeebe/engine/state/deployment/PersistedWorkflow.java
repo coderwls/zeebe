@@ -7,103 +7,74 @@
  */
 package io.zeebe.engine.state.deployment;
 
-import static io.zeebe.db.impl.ZeebeDbConstants.ZB_DB_BYTE_ORDER;
-import static io.zeebe.util.buffer.BufferUtil.bufferAsString;
-import static io.zeebe.util.buffer.BufferUtil.readIntoBuffer;
-import static io.zeebe.util.buffer.BufferUtil.writeIntoBuffer;
-
 import io.zeebe.db.DbValue;
+import io.zeebe.msgpack.UnpackedObject;
+import io.zeebe.msgpack.property.BinaryProperty;
+import io.zeebe.msgpack.property.IntegerProperty;
+import io.zeebe.msgpack.property.LongProperty;
+import io.zeebe.msgpack.property.StringProperty;
 import io.zeebe.protocol.impl.record.value.deployment.DeploymentResource;
 import io.zeebe.protocol.impl.record.value.deployment.Workflow;
 import org.agrona.DirectBuffer;
-import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.UnsafeBuffer;
 
-public final class PersistedWorkflow implements DbValue {
-  final UnsafeBuffer bpmnProcessId = new UnsafeBuffer(0, 0);
-  final UnsafeBuffer resourceName = new UnsafeBuffer(0, 0);
-  final UnsafeBuffer resource = new UnsafeBuffer(0, 0);
-  int version = -1;
-  long key = -1;
+public final class PersistedWorkflow extends UnpackedObject implements DbValue {
+
+  private final StringProperty processIdProp = new StringProperty("processId");
+  private final StringProperty resourceNameProp = new StringProperty("resourceName");
+  private final LongProperty keyProp = new LongProperty("key");
+  private final IntegerProperty versionProp = new IntegerProperty("version");
+  private final BinaryProperty resourceProp = new BinaryProperty("resource", new UnsafeBuffer());
+
+  public PersistedWorkflow() {
+    declareProperty(processIdProp)
+        .declareProperty(resourceNameProp)
+        .declareProperty(keyProp)
+        .declareProperty(versionProp)
+        .declareProperty(resourceProp);
+  }
 
   public void wrap(
       final DeploymentResource resource, final Workflow workflow, final long workflowKey) {
-    this.resource.wrap(resource.getResourceBuffer());
-    this.resourceName.wrap(resource.getResourceNameBuffer());
-    this.bpmnProcessId.wrap(workflow.getBpmnProcessIdBuffer());
 
-    this.version = workflow.getVersion();
-    this.key = workflowKey;
+    this.resourceProp.setValue(resource.getResourceBuffer());
+    this.resourceNameProp.setValue(resource.getResourceNameBuffer());
+    this.processIdProp.setValue(workflow.getBpmnProcessIdBuffer());
+
+    this.versionProp.setValue(workflow.getVersion());
+    this.keyProp.setValue(workflowKey);
+  }
+
+  @Override
+  public void wrap(DirectBuffer buff) {
+    wrap(buff, 0, buff.capacity());
+  }
+
+  @Override
+  public void wrap(DirectBuffer buff, int offset, int length) {
+    final byte[] bytes = new byte[length];
+    final UnsafeBuffer mutableBuffer = new UnsafeBuffer(bytes);
+    buff.getBytes(offset, bytes, 0, length);
+    super.wrap(mutableBuffer, 0, length);
   }
 
   public int getVersion() {
-    return version;
+    return versionProp.getValue();
   }
 
   public long getKey() {
-    return key;
+    return keyProp.getValue();
   }
 
-  public UnsafeBuffer getBpmnProcessId() {
-    return bpmnProcessId;
+  public DirectBuffer getBpmnProcessId() {
+    return processIdProp.getValue();
   }
 
-  public UnsafeBuffer getResourceName() {
-    return resourceName;
+  public DirectBuffer getResourceName() {
+    return resourceNameProp.getValue();
   }
 
-  public UnsafeBuffer getResource() {
-    return resource;
-  }
-
-  @Override
-  public void wrap(final DirectBuffer buffer, final int offset, final int length) {
-    int valueOffset = offset;
-    version = buffer.getInt(offset, ZB_DB_BYTE_ORDER);
-    valueOffset += Integer.BYTES;
-    key = buffer.getLong(valueOffset, ZB_DB_BYTE_ORDER);
-    valueOffset += Long.BYTES;
-    valueOffset = readIntoBuffer(buffer, valueOffset, bpmnProcessId);
-    valueOffset = readIntoBuffer(buffer, valueOffset, resourceName);
-    readIntoBuffer(buffer, valueOffset, resource);
-  }
-
-  @Override
-  public int getLength() {
-    return Long.BYTES
-        + Integer.BYTES
-        + Integer.BYTES * 3 // sizes
-        + bpmnProcessId.capacity()
-        + resourceName.capacity()
-        + resource.capacity();
-  }
-
-  @Override
-  public void write(final MutableDirectBuffer buffer, final int offset) {
-    int valueOffset = offset;
-    buffer.putInt(offset, version, ZB_DB_BYTE_ORDER);
-    valueOffset += Integer.BYTES;
-    buffer.putLong(valueOffset, key, ZB_DB_BYTE_ORDER);
-    valueOffset += Long.BYTES;
-    valueOffset = writeIntoBuffer(buffer, valueOffset, bpmnProcessId);
-    valueOffset = writeIntoBuffer(buffer, valueOffset, resourceName);
-    valueOffset = writeIntoBuffer(buffer, valueOffset, resource);
-    assert (valueOffset - offset) == getLength() : "End offset differs with getLength()";
-  }
-
-  @Override
-  public String toString() {
-    return "PersistedWorkflow{"
-        + "version="
-        + version
-        + ", key="
-        + key
-        + ", bpmnProcessId="
-        + bufferAsString(bpmnProcessId)
-        + ", resourceName="
-        + bufferAsString(resourceName)
-        + ", resource="
-        + bufferAsString(resource)
-        + '}';
+  public DirectBuffer getResource() {
+    return resourceProp.getValue();
   }
 }
