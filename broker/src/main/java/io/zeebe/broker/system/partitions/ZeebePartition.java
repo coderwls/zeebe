@@ -31,6 +31,7 @@ import io.zeebe.broker.logstreams.state.StatePositionSupplier;
 import io.zeebe.broker.system.configuration.BrokerCfg;
 import io.zeebe.broker.system.configuration.DataCfg;
 import io.zeebe.broker.system.configuration.ExporterCfg;
+import io.zeebe.broker.system.monitoring.HealthMetrics;
 import io.zeebe.broker.transport.commandapi.CommandApiService;
 import io.zeebe.db.ZeebeDb;
 import io.zeebe.engine.processor.AsyncSnapshotDirector;
@@ -94,6 +95,7 @@ public final class ZeebePartition extends Actor
   private FailureListener failureListener;
   private volatile HealthStatus healthStatus = HealthStatus.UNHEALTHY;
   private final HealthMonitor criticalComponentsHealthMonitor;
+  private final HealthMetrics healthMetrics;
 
   public ZeebePartition(
       final BrokerInfo localBroker,
@@ -127,6 +129,8 @@ public final class ZeebePartition extends Actor
 
     this.actorName = buildActorName(localBroker.getNodeId(), "ZeebePartition-" + partitionId);
     criticalComponentsHealthMonitor = new CriticalComponentsHealthMonitor(actor, LOG);
+    healthMetrics = new HealthMetrics(partitionId);
+    healthMetrics.setUnhealthy();
   }
 
   /**
@@ -601,18 +605,22 @@ public final class ZeebePartition extends Actor
   private void updateHealthStatus(final HealthStatus newStatus) {
     if (healthStatus != newStatus) {
       healthStatus = newStatus;
-      if (failureListener != null) {
-        switch (newStatus) {
-          case HEALTHY:
+      switch (newStatus) {
+        case HEALTHY:
+          healthMetrics.setHealthy();
+          if (failureListener != null) {
             failureListener.onRecovered();
-            break;
-          case UNHEALTHY:
+          }
+          break;
+        case UNHEALTHY:
+          healthMetrics.setUnhealthy();
+          if (failureListener != null) {
             failureListener.onFailure();
-            break;
-          default:
-            LOG.warn("Unknown health status {}", newStatus);
-            break;
-        }
+          }
+          break;
+        default:
+          LOG.warn("Unknown health status {}", newStatus);
+          break;
       }
     }
   }
