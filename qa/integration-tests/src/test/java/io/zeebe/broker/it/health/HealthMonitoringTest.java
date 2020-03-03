@@ -13,12 +13,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.zeebe.broker.Broker;
 import io.zeebe.broker.it.clustering.ClusteringRule;
 import io.zeebe.broker.it.util.GrpcClientRule;
+import io.zeebe.broker.system.configuration.SocketBindingCfg;
 import io.zeebe.protocol.Protocol;
 import java.io.File;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.RuleChain;
@@ -45,7 +51,7 @@ public class HealthMonitoringTest {
     final Broker leader = clusteringRule.getBroker(leaderNodeId);
     final Collection<Broker> followers = new ArrayList<>(clusteringRule.getBrokers());
     followers.remove(leader);
-    followers.forEach(follower -> assertThat(follower.isHealthy()).isTrue());
+    followers.forEach(follower -> assertThat(isBrokerHealthy(follower)).isTrue());
 
     // do some work to create a snapshot
     clientRule.createSingleJob(JOB_TYPE);
@@ -60,9 +66,7 @@ public class HealthMonitoringTest {
     leader.close();
 
     // then
-    // TODO: Use http endpoint to query health status when it is available
-    // https://github.com/zeebe-io/zeebe/issues/3833
-    waitUntil(() -> followers.stream().anyMatch(follower -> !follower.isHealthy()));
+    waitUntil(() -> followers.stream().anyMatch(follower -> !isBrokerHealthy(follower)));
   }
 
   private void corruptAllSnapshots(final Broker leader) {
@@ -76,5 +80,22 @@ public class HealthMonitoringTest {
                   .filter(f -> f.getName().contains("MANIFEST"))
                   .forEach(file -> file.delete());
             });
+  }
+
+  private boolean isBrokerHealthy(final Broker broker) {
+    final SocketBindingCfg monitoringApi = broker.getConfig().getNetwork().getMonitoringApi();
+    final String baseUrl =
+        String.format("http://%s:%d", monitoringApi.getHost(), monitoringApi.getPort());
+    final String url = baseUrl + "/health";
+
+    try (final CloseableHttpClient client = HttpClients.createDefault()) {
+      final HttpGet request = new HttpGet(url);
+      try (final CloseableHttpResponse response = client.execute(request)) {
+        return response.getStatusLine().getStatusCode() != 503;
+      }
+    } catch (final IOException e) {
+      e.printStackTrace();
+    }
+    return false;
   }
 }

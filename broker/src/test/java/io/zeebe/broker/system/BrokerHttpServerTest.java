@@ -57,4 +57,16 @@ public final class BrokerHttpServerTest {
       }
     }
   }
+
+  @Test
+  public void shouldGetHealthStatus() throws IOException {
+    final String url = baseUrl + "/health";
+
+    try (final CloseableHttpClient client = HttpClients.createDefault()) {
+      final HttpGet request = new HttpGet(url);
+      try (final CloseableHttpResponse response = client.execute(request)) {
+        assertThat(response.getStatusLine().getStatusCode()).isEqualTo(204);
+      }
+    }
+  }
 }
