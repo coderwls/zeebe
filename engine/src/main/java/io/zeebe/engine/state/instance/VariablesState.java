@@ -10,7 +10,6 @@ package io.zeebe.engine.state.instance;
 import io.zeebe.db.ColumnFamily;
 import io.zeebe.db.DbContext;
 import io.zeebe.db.ZeebeDb;
-import io.zeebe.db.impl.DbBuffer;
 import io.zeebe.db.impl.DbCompositeKey;
 import io.zeebe.db.impl.DbLong;
 import io.zeebe.db.impl.DbString;
@@ -43,8 +42,8 @@ public class VariablesState {
   private final DirectBuffer resultView = new UnsafeBuffer(0, 0);
 
   // (child scope key) => (parent scope key)
-  private final ColumnFamily<DbLong, DbLong> childParentColumnFamily;
-  private final DbLong parentKey;
+  private final ColumnFamily<DbLong, ParentKey> childParentColumnFamily;
+  private final ParentKey parentKey;
   private final DbLong childKey;
 
   // (scope key, variable name) => (variable value)
@@ -55,8 +54,8 @@ public class VariablesState {
   private final DbString variableName;
 
   // (scope key) => (temporaryVariables)
-  private final ColumnFamily<DbLong, DbBuffer> temporaryVariableStoreColumnFamily;
-  private final DbBuffer temporaryVariables = new DbBuffer();
+  private final ColumnFamily<DbLong, TemporaryVariables> temporaryVariableStoreColumnFamily;
+  private final TemporaryVariables temporaryVariables = new TemporaryVariables();
 
   private final VariableInstance newVariable = new VariableInstance();
   private final DirectBuffer variableNameView = new UnsafeBuffer(0, 0);
@@ -78,7 +77,7 @@ public class VariablesState {
       final KeyGenerator keyGenerator) {
     this.keyGenerator = keyGenerator;
 
-    parentKey = new DbLong();
+    parentKey = new ParentKey();
     childKey = new DbLong();
     childParentColumnFamily =
         zeebeDb.createColumnFamily(
@@ -284,8 +283,8 @@ public class VariablesState {
   private long getParent(final long childKey) {
     this.childKey.wrapLong(childKey);
 
-    final DbLong parentKey = childParentColumnFamily.get(this.childKey);
-    return parentKey != null ? parentKey.getValue() : NO_PARENT;
+    final ParentKey parentKey = childParentColumnFamily.get(this.childKey);
+    return parentKey != null ? parentKey.get() : NO_PARENT;
   }
 
   public DirectBuffer getVariablesAsDocument(final long scopeKey) {
@@ -421,7 +420,7 @@ public class VariablesState {
 
   public void createScope(final long childKey, final long parentKey) {
     this.childKey.wrapLong(childKey);
-    this.parentKey.wrapLong(parentKey);
+    this.parentKey.set(parentKey);
 
     childParentColumnFamily.put(this.childKey, this.parentKey);
   }
@@ -444,13 +443,13 @@ public class VariablesState {
 
   public void setTemporaryVariables(final long scopeKey, final DirectBuffer variables) {
     this.scopeKey.wrapLong(scopeKey);
-    temporaryVariables.wrapBuffer(variables);
+    temporaryVariables.setValue(variables);
     temporaryVariableStoreColumnFamily.put(this.scopeKey, temporaryVariables);
   }
 
   public DirectBuffer getTemporaryVariables(final long scopeKey) {
     this.scopeKey.wrapLong(scopeKey);
-    final DbBuffer variables = temporaryVariableStoreColumnFamily.get(this.scopeKey);
+    final TemporaryVariables variables = temporaryVariableStoreColumnFamily.get(this.scopeKey);
 
     return variables == null ? null : variables.getValue();
   }
