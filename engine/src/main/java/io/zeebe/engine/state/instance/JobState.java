@@ -10,7 +10,6 @@ package io.zeebe.engine.state.instance;
 import io.zeebe.db.ColumnFamily;
 import io.zeebe.db.DbContext;
 import io.zeebe.db.ZeebeDb;
-import io.zeebe.db.impl.DbByte;
 import io.zeebe.db.impl.DbCompositeKey;
 import io.zeebe.db.impl.DbLong;
 import io.zeebe.db.impl.DbNil;
@@ -40,8 +39,8 @@ public final class JobState {
   private final ColumnFamily<DbLong, UnpackedObjectValue> jobsColumnFamily;
 
   // key => job state
-  private final DbByte jobState;
-  private final ColumnFamily<DbLong, DbByte> statesJobColumnFamily;
+  private final JobStateValue jobState;
+  private final ColumnFamily<DbLong, JobStateValue> statesJobColumnFamily;
 
   // type => [key]
   private final DbString jobTypeKey;
@@ -68,7 +67,7 @@ public final class JobState {
     jobsColumnFamily =
         zeebeDb.createColumnFamily(ZbColumnFamilies.JOBS, dbContext, jobKey, jobRecordToRead);
 
-    jobState = new DbByte();
+    jobState = new JobStateValue();
     statesJobColumnFamily =
         zeebeDb.createColumnFamily(ZbColumnFamilies.JOB_STATES, dbContext, jobKey, jobState);
 
@@ -225,13 +224,13 @@ public final class JobState {
   public State getState(final long key) {
     jobKey.wrapLong(key);
 
-    final DbByte storedState = statesJobColumnFamily.get(jobKey);
+    final JobStateValue storedState = statesJobColumnFamily.get(jobKey);
 
     if (storedState == null) {
       return State.NOT_FOUND;
     }
 
-    return State.forValue(storedState.getValue());
+    return storedState.get();
   }
 
   public boolean isInState(final long key, final State state) {
@@ -297,7 +296,7 @@ public final class JobState {
   }
 
   private void updateJobState(final State newState) {
-    jobState.wrapByte(newState.value);
+    jobState.set(newState);
     statesJobColumnFamily.put(jobKey, jobState);
   }
 
