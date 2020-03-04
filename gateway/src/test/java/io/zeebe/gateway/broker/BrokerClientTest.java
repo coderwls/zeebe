@@ -203,10 +203,13 @@ public final class BrokerClientTest {
 
     // then
     exception.expect(ExecutionException.class);
-    exception.expectMessage("Request timed out after PT3S");
+    exception.expectMessage("Request type command-api-1 timed out in 3000 milliseconds");
 
     // when
-    client.sendRequest(new BrokerCompleteJobRequest(1, DocumentValue.EMPTY_DOCUMENT)).join();
+    final long key = Protocol.encodePartitionId(1, 123);
+    final var request = new BrokerCompleteJobRequest(key, DocumentValue.EMPTY_DOCUMENT);
+    request.setPartitionId(1);
+    client.sendRequest(request).join();
   }
 
   @Test
