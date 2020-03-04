@@ -24,43 +24,43 @@ public final class IncidentState {
 
   // we need two separate wrapper to not interfere with get and put
   // see https://github.com/zeebe-io/zeebe/issues/1916
-  private final UnpackedObjectValue incidenRecordToRead;
+  private final UnpackedObjectValue incidentRecordToRead;
   private final UnpackedObjectValue incidentRecordToWrite;
   private final ColumnFamily<DbLong, UnpackedObjectValue> incidentColumnFamily;
 
   /** element instance key -> incident key */
   private final DbLong elementInstanceKey;
 
-  private final ColumnFamily<DbLong, DbLong> workflowInstanceIncidentColumnFamily;
+  private final ColumnFamily<DbLong, Incident> workflowInstanceIncidentColumnFamily;
+  private final Incident incident;
 
   /** job key -> incident key */
   private final DbLong jobKey;
 
-  private final ColumnFamily<DbLong, DbLong> jobIncidentColumnFamily;
+  private final ColumnFamily<DbLong, Incident> jobIncidentColumnFamily;
 
   private final IncidentMetrics metrics;
 
   public IncidentState(
       final ZeebeDb<ZbColumnFamilies> zeebeDb, final DbContext dbContext, final int partitionId) {
     incidentKey = new DbLong();
-    incidenRecordToRead = new UnpackedObjectValue();
-    incidenRecordToRead.wrapObject(new IncidentRecord());
+    incident = new Incident();
+
+    incidentRecordToRead = new UnpackedObjectValue();
+    incidentRecordToRead.wrapObject(new IncidentRecord());
     incidentRecordToWrite = new UnpackedObjectValue();
     incidentColumnFamily =
         zeebeDb.createColumnFamily(
-            ZbColumnFamilies.INCIDENTS, dbContext, incidentKey, incidenRecordToRead);
+            ZbColumnFamilies.INCIDENTS, dbContext, incidentKey, incidentRecordToRead);
 
     elementInstanceKey = new DbLong();
     workflowInstanceIncidentColumnFamily =
         zeebeDb.createColumnFamily(
-            ZbColumnFamilies.INCIDENT_WORKFLOW_INSTANCES,
-            dbContext,
-            elementInstanceKey,
-            incidentKey);
+            ZbColumnFamilies.INCIDENT_WORKFLOW_INSTANCES, dbContext, elementInstanceKey, incident);
 
     jobKey = new DbLong();
     jobIncidentColumnFamily =
-        zeebeDb.createColumnFamily(ZbColumnFamilies.INCIDENT_JOBS, dbContext, jobKey, incidentKey);
+        zeebeDb.createColumnFamily(ZbColumnFamilies.INCIDENT_JOBS, dbContext, jobKey, incident);
 
     metrics = new IncidentMetrics(partitionId);
   }
@@ -70,12 +70,13 @@ public final class IncidentState {
     this.incidentRecordToWrite.wrapObject(incident);
     incidentColumnFamily.put(this.incidentKey, this.incidentRecordToWrite);
 
+    this.incident.setKey(incidentKey);
     if (isJobIncident(incident)) {
       jobKey.wrapLong(incident.getJobKey());
-      jobIncidentColumnFamily.put(jobKey, this.incidentKey);
+      jobIncidentColumnFamily.put(jobKey, this.incident);
     } else {
       elementInstanceKey.wrapLong(incident.getElementInstanceKey());
-      workflowInstanceIncidentColumnFamily.put(elementInstanceKey, this.incidentKey);
+      workflowInstanceIncidentColumnFamily.put(elementInstanceKey, this.incident);
     }
 
     metrics.incidentCreated();
@@ -112,10 +113,10 @@ public final class IncidentState {
   public long getWorkflowInstanceIncidentKey(final long workflowInstanceKey) {
     elementInstanceKey.wrapLong(workflowInstanceKey);
 
-    final DbLong incidentKey = workflowInstanceIncidentColumnFamily.get(elementInstanceKey);
+    final Incident incident = workflowInstanceIncidentColumnFamily.get(elementInstanceKey);
 
-    if (incidentKey != null) {
-      return incidentKey.getValue();
+    if (incident != null) {
+      return incident.getKey();
     }
 
     return MISSING_INCIDENT;
@@ -123,10 +124,10 @@ public final class IncidentState {
 
   public long getJobIncidentKey(final long jobKey) {
     this.jobKey.wrapLong(jobKey);
-    final DbLong incidentKey = jobIncidentColumnFamily.get(this.jobKey);
+    final Incident incident = jobIncidentColumnFamily.get(this.jobKey);
 
-    if (incidentKey != null) {
-      return incidentKey.getValue();
+    if (incident != null) {
+      return incident.getKey();
     }
     return MISSING_INCIDENT;
   }
